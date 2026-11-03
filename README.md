@@ -134,7 +134,7 @@ npm install
 `%DSH_HOME%` 默认是 `C:\Users\<你>\.dsh`。
 插件的加载靠 `cordis.patch.yml`,它在仓库根目录,不要改名字。
 
-**跨会话记忆要额外两步**(可选,不装也能用,只是没有向量):
+**跨会话记忆使用了embedding模型完成相似任务**(可选,不装也能用,只是没有向量):
 
 ```bash
 # 模型:约 91 MB,从 modelscope 下(huggingface 在国内常常连不上)
