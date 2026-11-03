@@ -1,0 +1,25 @@
+node_modules/
+__pycache__/
+*.pyc
+
+# 运行时数据不该进仓库
+*.db
+*.db-wal
+*.db-shm
+models/
+reading/
+status.json
+keepers.md
+persona.txt
+captain_rules.json
+.env
+
+# 本地覆盖的 prompt
+prompts/*.local.md
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

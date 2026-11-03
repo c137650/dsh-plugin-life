@@ -1,0 +1,37 @@
+{
+  "name": "dsh-plugin-life",
+  "version": "0.1.0",
+  "description": "A simulated daily life for the persona in DeepSeek Harness: a physiology-constrained finite state machine (sleep / eat / awake), real background activities executed by spawned agents, a SQLite event memory with age-graded compression, and a memory mount that never outranks the persona.",
+  "type": "module",
+  "main": "lib/index.js",
+  "license": "MIT",
+  "author": "lw-storm",
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh-plugin",
+    "persona",
+    "simulation",
+    "memory"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "prompts",
+    "cordis.patch.yml"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  }
+}
