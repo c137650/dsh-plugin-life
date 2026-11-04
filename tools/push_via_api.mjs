@@ -78,10 +78,28 @@ const baseSha = ref.object.sha
 const baseCommit = await api('GET', `/repos/${repo}/git/commits/${baseSha}`)
 console.log('基线 commit', baseSha.slice(0, 8), String(baseCommit.message).split('\n')[0])
 
+// 基线里每个路径对应的 blob sha。
+//
+// 为什么需要它:GitHub 的建树接口对"删掉一个本来就不存在的路径"会返回 422
+// (GitRPC::BadObjectState)。本地 git 的 diff 是按老的 origin/main 算的,
+// 里面可能包含远端早就删掉的文件 —— 那些 delete 条目必须跳过。
+const baseTree = await api('GET', `/repos/${repo}/git/trees/${baseCommit.tree.sha}?recursive=1`)
+const basePaths = new Map()
+for (const entry of baseTree.tree ?? []) {
+  if (entry.type === 'blob') basePaths.set(entry.path, entry.sha)
+}
+
 // ---- 逐个建 blob / 删条目 ----
 const tree = []
+let skippedDelete = 0
+let skippedSame = 0
 for (const { code, file } of diff) {
   if (code === 'D') {
+    if (!basePaths.has(file)) {
+      // 远端本来就没有,不用删
+      skippedDelete++
+      continue
+    }
     tree.push({ path: file, mode: '100644', type: 'blob', sha: null })
     console.log('  删除', file)
     continue
@@ -95,8 +113,19 @@ for (const { code, file } of diff) {
     content: content.toString('base64'),
     encoding: 'base64',
   })
+  if (basePaths.get(file) === blob.sha) {
+    // 内容一模一样,不用放进 tree
+    skippedSame++
+    continue
+  }
   tree.push({ path: file, mode: '100644', type: 'blob', sha: blob.sha })
   console.log('  写入', file, (content.length / 1024).toFixed(1) + 'K')
+}
+
+console.log(`跳过 ${skippedDelete} 个远端已不存在的删除、${skippedSame} 个内容相同的文件`)
+if (!tree.length) {
+  console.log('远端已经是最新的,什么都不用推')
+  process.exit(0)
 }
 
 // ---- 建 tree / commit / 挪 ref ----
