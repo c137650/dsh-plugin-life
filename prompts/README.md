@@ -6,12 +6,15 @@
 | 文件 | 用在哪里 | 变量 |
 |---|---|---|
 | `system-wrapper.md` | 所有后台 LLM 调用的 system prompt **包装层**,后面接 masterprompt 的人格全文 | 无 |
-| `writer-task.md` | 写手第一步:决定她此刻要去网上做什么 | `{{CLOCK}}` `{{CATEGORY}}` `{{RECENT}}` `{{PROFILE}}` |
+| `writer-task.md` | 写手第一步:决定她此刻要去网上做什么 | `{{CLOCK}}` `{{CATEGORY}}` `{{RECENT}}` `{{PROFILE}}` `{{AVOID}}` |
 | `writer-feeling.md` | 写手第二步:做完之后写摘要、经过、感受,并打两个分 | `{{TASK}}` `{{OUTPUT}}` `{{EVIDENCE}}` `{{PROFILE}}` `{{RECENT}}` |
 | `captain-summary.md` | 跨会话记忆:把一轮对话压成一句关于用户的事 | `{{LIMIT}}` `{{CAPTAIN}}` `{{ASSISTANT}}` |
 
 `{{VAR}}` 会被替换成对应内容。写错的占位符会**原样留在文本里**,不会被悄悄替换成空 ——
 这样一眼就能看出模板写错了。空值会被替换成空串,那一行随之消失。
+
+`{{AVOID}}` 平时是空的,只在"这次想做的事最近做过了"被拦下来、换一个类别重挑时才有内容 ——
+里面会列出刚才判定为重复的那几个方向,要求她换一条**完全不同的**路。
 
 ## 最重要的一条:后台人格要和前台人格一致
 
