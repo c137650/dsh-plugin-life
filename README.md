@@ -97,6 +97,15 @@
 3. 用这句话的句向量去判重:像就去重,不像就入库
 ```
 
+**这个库有自动迁移。** `CREATE TABLE IF NOT EXISTS` 对已经存在的表什么都不做,
+所以后来加进 `SCHEMA` 的列老库上不会有 —— 而代码里写着它,每次写入都报
+"没有这一列",异常又被吞掉,库里空得像"还没聊到值得记的事"。
+`degraded` 这一列就踩过这个坑,哑了三天。现在启动时按 `PRAGMA table_info` 逐列补,
+补了会写进 `status.json` 的 `captain.migrated`,结构对不上会报警(`captain.schema.ok`)。
+
+建表、补列、建索引的顺序不能换:索引引用具体列,半残的老表上先建索引会直接抛错,
+连补列的机会都没有。
+
 然后按**热度**决定谁能被挂载:
 
 ```
@@ -370,17 +379,48 @@ prompt 里钉了两条:不许照抄原句、超过字数硬砍(不信任模型�
 - 永久记忆(keep=1)不参与删减,也就不该占一般事件的预算(这是刻意的决定)
 - 文件里还有 SQLite 页开销、索引、空闲页
 
-所以触发口径是"可压缩内容的字节数",而 `status.json` 的 `dbBytes` 把四个数都写出来:
+所以触发口径是"可压缩内容的字节数",而 `status.json` 的 `dbBytes` 把这些数都写出来:
 
 ```
 fileBytes          磁盘上的文件多大
 contentBytes       真正的内容字节(全量,含永久记忆)
 compressibleBytes  可压缩的内容字节  ← 压缩看的是这个
-limitBytes         上限(默认 256 KB)
+limitBytes         上限(默认 200 KB)
 usedPercent        到哪了
+pages / freePages  总页数 / 空闲页数
 ```
 
 看到 `fileBytes` 涨而 `compressibleBytes` 没到线,那不是 bug —— 是永久记忆在长。
+
+### 压缩之后文件为什么不会自己变小
+
+这个坑被问过:"life.db 大小没变,不是应该自动压缩了吗?"
+
+压缩确实发生了,只是**文件不会跟着变小**。SQLite 清空数据之后,腾出来的页
+进"空闲页列表"留着将来复用,不还给磁盘 —— 这是它的设计,不是故障。
+
+实测那一幕:
+
+```
+压缩前  可压缩内容 237.7 KB
+压缩后  可压缩内容  40.3 KB      ← 真降了
+文件     344 KB → 344 KB         ← 纹丝不动
+其中     42 页空闲 = 168 KB(占 48.8%)
+```
+
+所以现在压缩之后会顺手 `VACUUM` + `wal_checkpoint(TRUNCATE)`,把空间还回去:
+
+```
+344 KB → 104 KB    (26 页,0 空闲)
+```
+
+两个细节:
+- **WAL 模式下 VACUUM 不够**,结果先落在 `-wal` 文件里,主库要 checkpoint 才真的截短。
+  实测同一个库:VACUUM 后 4008 KB 不动,`wal_checkpoint(TRUNCATE)` 后 88 KB。
+- VACUUM 会被别的连接挡住(WAL 下有读事务就可能 BUSY),失败不算致命 ——
+  压缩本身已经完成,文件不收只是占点磁盘。
+
+判断"压没压"永远看 `compressibleBytes`,不要看文件大小。
 
 ---
 
@@ -457,11 +497,23 @@ usedPercent        到哪了
 ```bash
 cd dsh-plugin-life
 node test/prompts.test.mjs          # prompt 加载器(不依赖模型,秒过)
+node test/captain-schema.test.mjs   # captain.db 的表结构迁移(不依赖模型)
+node test/vacuum.test.mjs           # 文件大小 vs 真实内容 vs VACUUM(不依赖模型)
 node test/topic-dedupe.test.mjs     # 话题查重(需要 python 环境 + 模型)
 node test/captain-memory.test.mjs   # 跨会话记忆端到端(同上)
 ```
 
-三个测试在缺 python / 缺模型时会跳过相关断言并明确说出来,不会假装通过。
+需要模型的测试在缺 python / 缺模型时会跳过相关断言并明确说出来,不会假装通过。
+冷启动要 import torch 再加载模型,机器忙的时候到过 20 秒以上,所以等待上限是 60 秒。
+
+运维用的三个脚本:
+
+```bash
+node tools/db_pages.mjs                          # 文件大小 / 空闲页 / 真实内容,解释为什么文件没变小
+node tools/compress_now.mjs 200 --vacuum         # 手动压一次并收空间
+node tools/clear_keepers.mjs [--apply]           # 清永久记忆(默认预演)
+node tools/find_orphan_notes.mjs <备份库> [--delete]   # 找回/清理没人引用的笔记
+```
 
 ## 许可
 

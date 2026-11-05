@@ -99,8 +99,13 @@ if (!captain) process.exit(1)
 
 captain.warm()
 {
+  // 冷启动要 import torch 再加载模型,机器在忙的时候实测到过 20 秒以上。
+  // 等太短会把"慢"误判成"没有嵌入服务",然后一堆断言被跳过 —— 看起来像过了一半。
   const t0 = Date.now()
-  while (!captain.embedReady() && Date.now() - t0 < 20000) await wait(200)
+  const LIMIT_MS = 60000
+  while (!captain.embedReady() && Date.now() - t0 < LIMIT_MS) await wait(200)
+  const took = Date.now() - t0
+  if (captain.embedReady()) console.log('  (嵌入服务就绪,用了 ' + (took / 1000).toFixed(1) + ' 秒)')
 }
 const hasEmbed = captain.embedReady()
 if (!hasEmbed) console.log('  (嵌入服务没起来 —— 判重/提及相关的断言会跳过)')
