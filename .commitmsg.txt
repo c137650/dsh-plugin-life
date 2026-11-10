@@ -1,23 +1,13 @@
-feat: 空闲页「有空就收」—— 从只在压缩后收,改成通用回收
+tools: 仓库发布工具（建仓库 / 推新仓库 / 压成一个提交）
 
-舰长指出:之前说 life.db 压缩完大小不变是因为空闲页,那这个问题不止出在压缩那一条路上。
-确实 —— 空闲页还会由沉底、删行、大字段释放产生,而 reclaimSpace 原来只挂在压缩上。
-
-改成通用回收:
-  压缩之后      → 立刻收(强制)
-  心跳的空档    → 空闲页超过 10% 就收一次(活动正在跑的时候不收)
-  记忆沉底之后  → 收一次(captain.db 同理)
-
-不是每次都收:空闲页不到 10%(或不到 4 页)不折腾,那些空间下次写入会用掉;
-刚收完 freelist_count = 0,下一次自然不重复折腾。
-
-真库现状:captain.db 刚才删掉 6 条之后有 50% 是空闲页(56 KB → 28 KB,7 页 0 空闲);
-life.db 0 空闲页(192 KB / 48 页,内容 114.6 KB)。
-
-顺带搞清一件事,写进 README:
-  删行             → 文件不变小,有空闲页,能 VACUUM 收回来
-  正文置空         → 文件不变小,没有空闲页,收不回来(空间还在页内)
-  清掉大字段       → 文件不变小,有空闲页,能收(大文本在溢出页里,整页释放)
-压缩剥正文之所以能产生空闲页,是因为 detail 那种大字段本身占溢出页。
-
-测试:新增 reclaim.test.mjs(7 项)
+给日程插件发布时踩出来的:
+- 建仓库的端点是 POST /user/repos。POST /repos/{owner}/{repo} 是「改仓库」，
+  对不存在的仓库回 404。
+- 空仓库不能让 Git Data API 建 blob（409 Git Repository is empty），
+  要用 contents API（PUT /contents/{path}）—— 它能在空仓库上工作，
+  第一个 PUT 顺手把分支建出来。
+  但 contents API 是一个文件一个 commit，历史会碎成十几次，
+  所以仓库非空之后再用 Git Data API 从零建 tree + 根提交，force 挪 ref，压成一个。
+- 挪 ref 要 force:true，否则 422 "Update is not a fast forward"
+  （根提交不是当前 ref 的后代）。
+- github.com:443 时通时不通，api.github.com 稳。所以发布走 API 推送，不走 git 协议。
