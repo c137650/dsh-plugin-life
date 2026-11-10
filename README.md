@@ -505,6 +505,35 @@ pages / freePages  总页数 / 空闲页数
 
 判断"压没压"永远看 `compressibleBytes`,不要看文件大小。
 
+### 空闲页:有空就收
+
+空闲页**不止压缩会产生**。沉底(剥正文)、删行、大字段释放,都会在文件里留洞。
+SQLite 把这些页放进"空闲页列表"留着将来复用,**文件不会变小** —— 同一个问题,
+不只出在压缩那一条路上。
+
+所以回收做成了通用的:
+
+```
+压缩之后      → 立刻收(强制)
+心跳的空档    → 空闲页超过 10% 就收一次
+记忆沉底之后  → 收一次
+```
+
+不是每次都收:空闲页不到 10%(或者不到 4 页)就不折腾,那些空间下次写入本来也会用掉;
+刚收完 `freelist_count = 0`,下一次自然不会重复折腾。
+
+还有一种"空"收不回来,值得说清楚:
+
+| 操作 | 文件变小吗 | 空闲页 | 能 VACUUM 收回来吗 |
+|---|---|---|---|
+| 删行 | 否 | 有 | 能 |
+| 把正文置空(`UPDATE ... = NULL`) | 否 | **没有** | 不能 —— 空间还在页内,SQLite 认为那些页还被表占着 |
+| 清掉大字段(`detail`) | 否 | 有 | 能(大文本存在溢出页里,整页释放) |
+
+压缩剥正文时之所以能产生空闲页,是因为 `detail` 那种大字段本身就占溢出页。
+
+`captain.db` 同理:记忆沉底之后也顺手收一次。
+
 ---
 
 ## 七、技术实现
@@ -583,6 +612,7 @@ node test/prompts.test.mjs          # prompt 加载器(不依赖模型,秒过)
 node test/captain-schema.test.mjs   # captain.db 的表结构迁移(不依赖模型)
 node test/captain-quality.test.mjs  # 记忆的质量闸 + 短标签(不依赖模型)
 node test/vacuum.test.mjs           # 文件大小 vs 真实内容 vs VACUUM(不依赖模型)
+node test/reclaim.test.mjs          # 空闲页:什么时候有、能不能收回来(不依赖模型)
 node test/topic-dedupe.test.mjs     # 话题查重(需要 python 环境 + 模型)
 node test/captain-memory.test.mjs   # 跨会话记忆端到端(同上)
 ```
