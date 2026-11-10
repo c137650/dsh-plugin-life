@@ -34,6 +34,13 @@ const skip = (name, why) => {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
+function readRows(dbFile) {
+  const db = new DatabaseSync(dbFile)
+  const rows = db.prepare('SELECT * FROM facts ORDER BY id').all()
+  db.close()
+  return rows
+}
+
 async function waitFor(dbFile, predicate, timeoutMs = 25000) {
   const t0 = Date.now()
   let last = []
@@ -193,16 +200,27 @@ console.log('\n=== 挂载 ===')
 }
 
 // ---------- 6 ----------
-console.log('\n=== 压缩失败时退化成原话截断 ===')
+console.log('\n=== 压缩失败时:不入库 ===')
 {
+  // 旧行为是"退化成原话截断 60 字"照样入库。
+  // 库里那两条垃圾就是这么来的:
+  //   「有问题。1."听到了。(ᗜ ˰ ᗜ) 重装小兔的拾音器一直开着……」
+  //   「舰长继续为桌面」
+  // 原话直存恰好是这套设计最想避免的东西 —— 舰长要的是"用你的话概括",
+  // 不让啰嗦占权重。所以现在宁可不记,也不写垃圾。
   llmEnabled = false
+  const before = readRows(dbFile).length
   captain.onUserTurn('s1', '我每天跑六点四公里,怕哪天丧尸真的来了', 'k5')
   captain.onAssistantText('s1', '布洛妮娅觉得这个理由很合理。')
   captain.onTurnEnd('s1')
-  const rows = await waitFor(dbFile, (rs) => rs.length === 3)
-  check('照样入库(不丢信息)', rows.length === 3, String(rows.length))
-  check('标成退化', rows[2]?.degraded === 1, String(rows[2]?.degraded))
-  check('退化也不超过 60 字', (rows[2]?.content?.length ?? 999) <= 60, String(rows[2]?.content?.length))
+  await wait(1500)
+  const after = readRows(dbFile)
+  check('压缩失败不入库', after.length === before, before + ' → ' + after.length)
+  check(
+    '库里没有原话',
+    !after.some((r) => String(r.content ?? '').includes('丧尸')),
+    JSON.stringify(after.map((r) => r.content)),
+  )
   llmEnabled = true
 }
 
@@ -249,7 +267,7 @@ console.log('\n=== 没有永久挂载:7 天后且没人提 -> 必然下沉 ===')
   db.prepare('UPDATE facts SET mention_count = 0, last_mention = NULL WHERE id = 1').run()
   db.close()
   const block = captain.buildBlock()
-  check('条数没少(不删行)', readAll().length === 3, String(readAll().length))
+  check('条数没少(不删行)', readAll().length === 2, String(readAll().length))
   check('杭州那条已经不在挂载里', !block.includes('杭州'), block.slice(0, 400))
 }
 
@@ -260,9 +278,9 @@ console.log('\n=== 压缩超字数时硬砍 ===')
   captain.onUserTurn('s1', '我明天要演讲,特别紧张,一直睡不着', 'k6')
   captain.onAssistantText('s1', '布洛妮娅陪你想两遍流程。')
   captain.onTurnEnd('s1')
-  const rows = await waitFor(dbFile, (rs) => rs.length === 4)
-  check('入库第四条', rows.length === 4, String(rows.length))
-  check('超长被砍到 60 字', rows[3]?.content?.length === 60, String(rows[3]?.content?.length))
+  const rows = await waitFor(dbFile, (rs) => rs.length === 3)
+  check('入库第三条', rows.length === 3, String(rows.length))
+  check('超长被砍到 60 字', rows[2]?.content?.length === 60, String(rows[2]?.content?.length))
 }
 
 console.log('\n=== 统计 ===')

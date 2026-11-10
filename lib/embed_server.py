@@ -24,12 +24,38 @@ import os
 import sys
 
 
+def fix_stdio():
+    """把 stdin/stdout 钉成 UTF-8。
+
+    这不是锦上添花,是**必须**的。
+
+    Windows 上 python 的 stdin 默认用系统 ANSI 代码页(简体中文机器上是 gbk),
+    而 Node 那边发的是 UTF-8 字节。于是中文被读成乱码 —— 某些字节组合还会
+    产生孤立代理字符(lone surrogate),Rust 写的分词器拒绝这种字符串,直接抛:
+
+        TypeError: TextEncodeInput must be Union[TextInputSequence, ...]
+
+    表现出来是"嵌入服务一直返回 null",于是判重从来��生效、相似的事件全都入库。
+    这个坑踩过一次:captain.db 里 7 条记录的向量全是空的,而分词器单独拿出来测
+    却是好的 —— 因为单独测的时候不走 stdin。
+
+    reconfigure 只在 python 3.7+ 有,低版本就退回 utf-8 环境变量那套。
+    """
+    for stream in (sys.stdin, sys.stdout):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001
+            pass
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
+
 def out(obj):
     sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
     sys.stdout.flush()
 
 
 def main():
+    fix_stdio()
     model_dir = sys.argv[1] if len(sys.argv) > 1 else ""
     if not model_dir or not os.path.isdir(model_dir):
         out({"id": 0, "error": "model-dir-missing: " + str(model_dir)})

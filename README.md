@@ -106,6 +106,89 @@
 建表、补列、建索引的顺序不能换:索引引用具体列,半残的老表上先建索引会直接抛错,
 连补列的机会都没有。
 
+### 6.1 嵌入服务曾经一直是坏的(Windows 编码)
+
+这一条影响的不只是这个库 —— 活动那边的主题查重也一起废了。
+
+`embed_server.py` 用 `for line in sys.stdin` 读请求。Windows 上 python 的 stdin
+默认走**系统 ANSI 代码页**(这台机器是 gbk),而 Node 那边发的是 UTF-8 字节。
+于是:
+
+```
+请求 → GBK 解码 → 中文变乱码 → 某些字节组合产生孤立代理字符
+     → Rust 写的分词器拒绝这种字符串 → 每次都回 {"id":1,"error":"TypeError(...)"}
+     → JS 拿到 null → 向量永远是空的
+```
+
+表现是"嵌入服务静默失效":判重永远返回 null,于是**相似的事件全都各存一份**。
+库里 7 条记录的 `vec` 列全是空的,就是证据。
+
+分词器单独拿出来测是好的 —— 因为单独测不走 stdin。这条最费时间的就是这一点:
+看起来像模型/向量的问题,其实是一行编码。
+
+修法两处,双保险:
+
+```python
+# embed_server.py
+sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+```
+```js
+// embed.js
+env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' }
+```
+
+另外两处配套的改动,都是为了让这类故障**不再无声**:
+
+- 服务端回 error 时**打日志**,以前是静默 reject,调用方只看到"没有向量"
+- 子进程退出码是 0 也记一笔 —— "安静地退了"这一种最难查,以前完全不留痕迹
+
+修好之后拿真数据量了一遍:活动那边 48 条活动里有 **90 对**落在 7 天窗口内且相似度
+超过 0.62 —— 也就是说"同一片地 7 天内走过就换方向"这条规则**从来没生效过**。
+
+### 6.2 记忆的质量闸
+
+库里有两条根本不该在的记录:
+
+```
+「有问题。1."听到了。(ᗜ ˰ ᗜ) 重装小兔的拾音器一直开着……」  ← 退化成原话,混进布洛妮娅的语气
+「舰长继续为桌面」                                          ← 半句话
+```
+
+第一条是**压缩失败时退化成"原话截断 60 字"**写进去的。那等于把设计原则最想避免的
+东西写进库里 —— 舰长当初要求"用你的话概括,不要照抄原话",就是为了不让啰嗦占权重。
+所以现在**压缩失败就不入库**,宁可不记,也不写垃圾。
+
+第二条是模型写得不好。所以入库前还有一道质量闸(`lib/captain/quality.js`):
+
+| 判据 | 挡的是什么 |
+|---|---|
+| 太短 | 「舰长继续为桌面」这种半句话 |
+| 不是第三人称 | 模型偶尔写成"我注意到……" |
+| 带语气标记 | 「(ᗜ ˰ ᗜ)」是布洛妮娅自己的,不是舰长的事 |
+| 像代码 | 混进来的技术片段 |
+| 工作相关 | 舰长定的:"工作相关的全不记" |
+
+**工作相关的闸只作用在压缩出来的概括上,不作用在原话上** —— 原话里几乎总有工作内容
+(那正是舰长来找布洛妮娅的原因),在原话上卡,这条链就什么都记不下来了。
+
+词表只是兜底,主力在 prompt:`prompts/captain-summary.md` 里明确写了
+"工作、项目、技术实现一律不要"。
+
+### 6.3 title 和 content
+
+以前 `title` 就是 `content` 的前 60 字,而 `SUMMARY_LIMIT` 正好是 60 ——
+所以两列**永远一模一样**(7 条记录,7 条相同)。既浪费,挂载的时候也没有
+"先扫标题、再看细节"的效果。
+
+现在:`title` 取第一句第一个逗号之前的那一截(通常就是"谁在做什么"),
+`content` 保留整句,挂载时把重复的开头去掉:
+
+```
+- [3 天前] 舰长习惯使用语音输入
+  「停顿稍长时容易重复说同一句话。」
+```
+
 然后按**热度**决定谁能被挂载:
 
 ```
@@ -498,6 +581,7 @@ pages / freePages  总页数 / 空闲页数
 cd dsh-plugin-life
 node test/prompts.test.mjs          # prompt 加载器(不依赖模型,秒过)
 node test/captain-schema.test.mjs   # captain.db 的表结构迁移(不依赖模型)
+node test/captain-quality.test.mjs  # 记忆的质量闸 + 短标签(不依赖模型)
 node test/vacuum.test.mjs           # 文件大小 vs 真实内容 vs VACUUM(不依赖模型)
 node test/topic-dedupe.test.mjs     # 话题查重(需要 python 环境 + 模型)
 node test/captain-memory.test.mjs   # 跨会话记忆端到端(同上)
@@ -506,13 +590,22 @@ node test/captain-memory.test.mjs   # 跨会话记忆端到端(同上)
 需要模型的测试在缺 python / 缺模型时会跳过相关断言并明确说出来,不会假装通过。
 冷启动要 import torch 再加载模型,机器忙的时候到过 20 秒以上,所以等待上限是 60 秒。
 
-运维用的三个脚本:
+运维用的脚本:
 
 ```bash
 node tools/db_pages.mjs                          # 文件大小 / 空闲页 / 真实内容,解释为什么文件没变小
 node tools/compress_now.mjs 200 --vacuum         # 手动压一次并收空间
 node tools/clear_keepers.mjs [--apply]           # 清永久记忆(默认预演)
 node tools/find_orphan_notes.mjs <备份库> [--delete]   # 找回/清理没人引用的笔记
+node tools/embed_probe.mjs                       # 嵌入服务能不能出向量
+node tools/embed_protocol.mjs                    # 直接跟嵌入服务说协议,看原始响应
+node tools/embed_handshake.mjs                   # 盯住握手
+node tools/inspect_captain.mjs                   # captain.db 逐条体检
+node tools/captain_similarity.mjs                # 库里两两有多像
+node tools/captain_threshold.mjs                 # 用真数据量判重阈值
+node tools/repair_captain.mjs                    # 补向量 + 改 title
+node tools/prune_captain.mjs [--dry]             # 删掉不合格的记录
+node tools/topic_dup_check.mjs                   # 活动那边有多少重复漏过去了
 ```
 
 ## 许可
