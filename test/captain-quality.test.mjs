@@ -104,7 +104,9 @@ console.log('\n=== 挂载时的样子 ===')
   }
   const out = renderFact(f, Date.now())
   console.log('    ' + out.replace(/\n/g, '\n    '))
-  check('有标签行', out.startsWith('- [3 天前] 舰长习惯使用语音输入'), out)
+  // 挂在最前面的是"日期,多久以前"两样都给 —— 只给"3 天前"的话,
+  // 句子里万一还留着"下周""周末",读的人没有锚点可以往回推。
+  check('有标签行', /^- \[\d{1,2} 月 \d{1,2} 日,3 天前\] 舰长习惯使用语音输入/.test(out), out)
   check('细节行不重复标签', !out.includes('「舰长习惯使用语音输入，'), out)
   check('细节保留了内容', out.includes('停顿稍长时容易重复说同一句话'), out)
 }

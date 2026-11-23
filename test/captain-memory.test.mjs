@@ -234,7 +234,7 @@ console.log('\n=== 冷热:30 天前 + 没被提过 -> 沉底且不再挂载 ==='
   captain.sinkNow()
   const block = captain.buildBlock()
   check('沉底的不再挂载', !block.includes('咖啡'), block.slice(0, 400))
-  check('还在 7 天内的照常挂载', block.includes('杭州'))
+  check('还在 4 天内的照常挂载', block.includes('杭州'))
 
   const row = readAll().find((r) => r.content === null)
   check('正文被剥掉', !!row)
@@ -259,7 +259,7 @@ console.log('\n=== 重新提及 -> 热度回升 -> 又挂上 ===')
 }
 
 // ---------- 9 ----------
-console.log('\n=== 没有永久挂载:7 天后且没人提 -> 必然下沉 ===')
+console.log('\n=== 没有永久挂载:出了 4 天窗口且没人提 -> 必然下沉 ===')
 {
   const db = new DatabaseSync(dbFile)
   db.prepare('UPDATE facts SET ts = ? WHERE id = 1').run(Date.now() - 8 * 86400_000)
