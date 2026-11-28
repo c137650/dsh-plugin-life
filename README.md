@@ -293,12 +293,12 @@ DSH 关掉期间的时间会被快进。重启后她算得出「本该醒着的�
 离最后一次键鼠多少秒、整屏截图(压到 1280 宽);判断一次 `llm.stream`,`maxTokens: 400`,
 只认一个 JSON,从「不动 / 通知 / 弹到前台开新会话 / 操作电脑」里挑一个。
 
-动作有配额和冷却:通知 5 次、开会话 3 次、操作 6 次(每天),冷却 30 / 60 / 20 分钟;
+动作没有次数上限,也没有冷却:模型判断该说就说,想开新会话就开;
 操作还要过白名单(播放暂停、点击、按键、移动)和 13 个危险词拦截。
 跨天的记录压成前一天的频次前四,存进 `presence/`。
 
 打开它只有两条路:`GET /dsh-life/presence?tick=1` 手动跑一轮,
-和 `POST /dsh-life/presence/config` 改 `enabled / provider / model / quota / cooldown`。
+和 `POST /dsh-life/presence/config` 改 `enabled / provider / model`。
 
 ---
 
@@ -502,7 +502,7 @@ DSH 的 GUI 里看不到插件日志,所以状态落盘 + 本机回环端点。�
 | `/dsh-life/icr/status` | 轮询进度 |
 | `/dsh-life/icr/result` | 完整结果,没出结果时 404 |
 | `/dsh-life/presence?tick=1` | 手动跑一轮在场判定,跳过时间表 |
-| `/dsh-life/presence/config` | 改 `enabled / provider / model / quota / cooldown` |
+| `/dsh-life/presence/config` | 改 `enabled / provider / model` |
 
 ---
 
